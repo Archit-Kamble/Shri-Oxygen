@@ -1,9 +1,10 @@
 require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const bodyParser = require('body-parser');
-const db = require('./db');
+const db = require('./db'); // ✅ db initialized ONCE, safely
 
 const app = express();
 app.use(cors());
@@ -37,12 +38,12 @@ const GAS_ORDER = [
 /* ================= LOGIN ================= */
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
-  const user = db.prepare(
+  const row = db.prepare(
     'SELECT * FROM users WHERE username=? AND password=?'
   ).get(username, password);
 
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-  res.json({ username: user.username });
+  if (!row) return res.status(401).json({ error: 'Invalid credentials' });
+  res.json({ username: row.username });
 });
 
 /* ================= TYPES ================= */
@@ -50,67 +51,67 @@ app.get('/api/types', (req, res) => {
   res.json(GAS_ORDER);
 });
 
-/* ================= HELPER ================= */
-function expandNumbersInput(type, input) {
-  if (!input) return [];
-  const base = type.replace(/[^A-Za-z0-9]/g, '').substring(0, 3).toUpperCase();
-  const tokens = input.split(',').map(x => x.trim()).filter(Boolean);
-  const out = [];
+/* ================= CYLINDERS ================= */
+app.get('/api/cylinders', (req, res) => {
+  const { status, type } = req.query;
+  let sql = 'SELECT * FROM cylinders';
+  const params = [];
+  const where = [];
 
-  for (const t of tokens) {
-    if (t.includes('-')) {
-      const [a, b] = t.split('-').map(Number);
-      for (let i = a; i <= b; i++) {
-        out.push(base + String(i).padStart(4, '0'));
-      }
-    } else {
-      out.push(base + String(Number(t)).padStart(4, '0'));
-    }
-  }
-  return [...new Set(out)];
-}
+  if (status) { where.push('status=?'); params.push(status); }
+  if (type) { where.push('type=?'); params.push(type); }
+  if (where.length) sql += ' WHERE ' + where.join(' AND ');
+
+  res.json(db.prepare(sql).all(...params));
+});
 
 /* ================= SELL ================= */
+function expandNumbersInput(type, input) {
+  const base = type.replace(/[^A-Za-z0-9]/g,'').substring(0,6).toUpperCase();
+  return input.split(',')
+    .map(x => x.trim())
+    .filter(Boolean)
+    .map(n => /^\d+$/.test(n) ? base + n.padStart(4,'0') : n);
+}
+
 app.post('/api/sell', (req, res) => {
-  const { type, customer, cylinder_numbers_input } = req.body || {};
-  if (!type || !customer?.name || !customer?.aadhar)
-    return res.status(400).json({ error: 'Missing fields' });
-
-  const cylinders = expandNumbersInput(type, cylinder_numbers_input);
-  if (!cylinders.length)
-    return res.status(400).json({ error: 'No cylinders parsed' });
-
-  let cust = db.prepare(
-    'SELECT * FROM customers WHERE aadhar=?'
-  ).get(customer.aadhar);
-
-  if (!cust) {
-    const r = db.prepare(
-      'INSERT INTO customers (name,aadhar,phone) VALUES (?,?,?)'
-    ).run(customer.name, customer.aadhar, customer.phone || null);
-    cust = db.prepare('SELECT * FROM customers WHERE id=?')
-      .get(r.lastInsertRowid);
-  }
-
   try {
-    for (const cn of cylinders) {
-      const row = db.prepare(
-        'SELECT * FROM cylinders WHERE cylinder_number=? AND type=?'
-      ).get(cn, type);
+    const { type, customer, cylinder_numbers_input } = req.body;
+    if (!type || !customer?.name || !customer?.aadhar)
+      return res.status(400).json({ error: 'Missing fields' });
 
-      if (!row || row.status !== 'inactive')
-        throw new Error('Invalid cylinder ' + cn);
+    const cylinders = expandNumbersInput(type, cylinder_numbers_input);
+    if (!cylinders.length)
+      return res.status(400).json({ error: 'No cylinders' });
 
-      db.prepare(
-        'UPDATE cylinders SET status="active", customer_id=? WHERE cylinder_number=?'
-      ).run(cust.id, cn);
+    let cust = db.prepare(
+      'SELECT * FROM customers WHERE aadhar=?'
+    ).get(customer.aadhar);
 
-      db.prepare(
-        'INSERT INTO history (action,cylinder_number,cylinder_type,customer_id,customer_name,aadhar,phone,created_at) VALUES (?,?,?,?,?,?,?,?)'
-      ).run('sell', cn, type, cust.id, cust.name, cust.aadhar, cust.phone, nowISO());
+    if (!cust) {
+      const r = db.prepare(
+        'INSERT INTO customers (name,aadhar,phone) VALUES (?,?,?)'
+      ).run(customer.name, customer.aadhar, customer.phone || null);
+      cust = db.prepare('SELECT * FROM customers WHERE id=?').get(r.lastInsertRowid);
     }
 
-    res.json({ success: true, assigned: cylinders });
+    const upd = db.prepare(
+      'UPDATE cylinders SET status="active", customer_id=? WHERE cylinder_number=? AND type=? AND status="inactive"'
+    );
+    const hist = db.prepare(
+      'INSERT INTO history (action,cylinder_number,cylinder_type,customer_id,customer_name,aadhar,phone,created_at) VALUES (?,?,?,?,?,?,?,?)'
+    );
+
+    const assigned = [];
+    for (const cn of cylinders) {
+      const ok = upd.run(cust.id, cn, type).changes;
+      if (!ok) throw new Error('Invalid cylinder ' + cn);
+
+      hist.run('sell', cn, type, cust.id, cust.name, cust.aadhar, cust.phone, nowISO());
+      assigned.push(cn);
+    }
+
+    res.json({ success:true, assigned });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -118,40 +119,67 @@ app.post('/api/sell', (req, res) => {
 
 /* ================= RETURN ================= */
 app.post('/api/return', (req, res) => {
-  const { cylinder_number } = req.body || {};
-  const row = db.prepare(
-    'SELECT * FROM cylinders WHERE cylinder_number=?'
-  ).get(cylinder_number);
+  try {
+    const { cylinder_number } = req.body;
+    const row = db.prepare(
+      'SELECT * FROM cylinders WHERE cylinder_number=? AND status="active"'
+    ).get(cylinder_number);
 
-  if (!row || row.status !== 'active')
-    return res.status(400).json({ error: 'Invalid return' });
+    if (!row) return res.status(400).json({ error: 'Invalid return' });
 
-  const cust = db.prepare(
-    'SELECT * FROM customers WHERE id=?'
-  ).get(row.customer_id);
+    const cust = db.prepare(
+      'SELECT * FROM customers WHERE id=?'
+    ).get(row.customer_id);
 
-  db.prepare(
-    'UPDATE cylinders SET status="inactive", customer_id=NULL WHERE cylinder_number=?'
-  ).run(cylinder_number);
+    db.prepare(
+      'UPDATE cylinders SET status="inactive", customer_id=NULL WHERE cylinder_number=?'
+    ).run(cylinder_number);
 
-  db.prepare(
-    'INSERT INTO history (action,cylinder_number,cylinder_type,customer_id,customer_name,aadhar,phone,created_at) VALUES (?,?,?,?,?,?,?,?)'
-  ).run('return', cylinder_number, row.type, cust?.id, cust?.name, cust?.aadhar, cust?.phone, nowISO());
+    db.prepare(
+      'INSERT INTO history (action,cylinder_number,cylinder_type,customer_id,customer_name,aadhar,phone,created_at) VALUES (?,?,?,?,?,?,?,?)'
+    ).run('return', cylinder_number, row.type, cust?.id, cust?.name, cust?.aadhar, cust?.phone, nowISO());
 
-  res.json({ success: true });
+    res.json({ success:true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
-/* ================= COUNTS (FIXED ORDER) ================= */
+/* ================= SEARCH ================= */
+app.get('/api/search', (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.status(400).json({ error:'Missing' });
+
+    const cust = db.prepare('SELECT * FROM customers WHERE aadhar=?').get(q);
+    if (cust) {
+      const counts = {};
+      db.prepare(
+        "SELECT type,COUNT(*) cnt FROM cylinders WHERE customer_id=? AND status='active' GROUP BY type"
+      ).all(cust.id).forEach(r => counts[r.type]=r.cnt);
+
+      const history = db.prepare(
+        'SELECT * FROM history WHERE customer_id=? ORDER BY created_at DESC'
+      ).all(cust.id);
+
+      return res.json({ type:'customer', customer:cust, counts, history });
+    }
+
+    return res.status(404).json({ error:'Not found' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error:'Search failed' });
+  }
+});
+
+/* ================= COUNTS ================= */
 app.get('/api/counts', (req, res) => {
-  const raw = db.prepare(`
-    SELECT type,
-    SUM(status='active') active_count,
-    SUM(status='inactive') inactive_count
-    FROM cylinders GROUP BY type
-  `).all();
+  const rows = db.prepare(
+    "SELECT type, SUM(status='active') active_count, SUM(status='inactive') inactive_count FROM cylinders GROUP BY type"
+  ).all();
 
   const map = {};
-  raw.forEach(r => map[r.type] = r);
+  rows.forEach(r => map[r.type]=r);
 
   res.json(GAS_ORDER.map(t => ({
     type: t,
@@ -161,34 +189,13 @@ app.get('/api/counts', (req, res) => {
 });
 
 /* ================= HISTORY ================= */
-app.get('/api/history', (req, res) => {
-  res.json(
-    db.prepare('SELECT * FROM history ORDER BY created_at DESC').all()
-  );
+app.get('/api/history', (req,res)=>{
+  res.json(db.prepare('SELECT * FROM history ORDER BY created_at DESC').all());
 });
 
-/* ================= SEARCH ================= */
-app.get('/api/search', (req, res) => {
-  const q = (req.query.q || '').trim();
-  if (!q) return res.status(400).json({ error: 'Missing query' });
-
-  const cust = db.prepare(
-    'SELECT * FROM customers WHERE aadhar=?'
-  ).get(q);
-
-  if (cust) {
-    const history = db.prepare(
-      'SELECT * FROM history WHERE customer_id=? ORDER BY created_at DESC'
-    ).all(cust.id);
-    return res.json({ type: 'customer', customer: cust, history });
-  }
-
-  return res.status(404).json({ error: 'Not found' });
-});
-
-/* ================= FALLBACK ================= */
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
+/* ================= FRONTEND ================= */
+app.get('*', (req,res)=>{
+  res.sendFile(path.join(__dirname,'..','frontend','index.html'));
 });
 
 const PORT = process.env.PORT || 4000;
