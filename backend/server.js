@@ -1,4 +1,3 @@
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -7,9 +6,7 @@ const db = require('./db');
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/', express.static(path.join(__dirname,'..','frontend')));
-
-function nowISO(){ return new Date().toISOString(); }
+app.use(express.static(path.join(__dirname,'..','frontend')));
 
 const GAS_ORDER = [
   'Oxygen','M Oxygen','Argon','Callgas','Acetylene','Zerogas',
@@ -17,88 +14,51 @@ const GAS_ORDER = [
   'Other Gas 1','Other Gas 2','Other Gas 3','Other Gas 4','Other Gas 5'
 ];
 
-const PREFIX = {
-  'Oxygen':'OXY','M Oxygen':'MOXY','Argon':'ARG','Callgas':'CALL',
-  'Acetylene':'ACET','Zerogas':'ZERO','Carbon Dioxide':'CO2',
-  'Ethylene':'ETH','Helium':'HE','Hydraulic':'HYD','Mixture':'MIX',
-  'Other Gas 1':'OG1','Other Gas 2':'OG2','Other Gas 3':'OG3',
-  'Other Gas 4':'OG4','Other Gas 5':'OG5'
-};
-
-// 🔁 NUMBER EXPAND (THIS FIXES SELL)
-function expandNumbers(type,input){
-  const base = PREFIX[type];
-  return input.split(',').map(x =>
-    base + String(parseInt(x.trim(),10)).padStart(4,'0')
-  );
-}
-
-/* LOGIN */
 app.post('/api/login',(req,res)=>{
-  const {username,password}=req.body;
-  const u=db.prepare(
+  const u = db.prepare(
     'SELECT * FROM users WHERE username=? AND password=?'
-  ).get(username,password);
-  if(!u) return res.status(401).json({error:'Invalid'});
-  res.json({username});
+  ).get(req.body.username, req.body.password);
+  if (!u) return res.status(401).json({error:'Invalid'});
+  res.json({username:u.username});
 });
 
-/* TYPES */
 app.get('/api/types',(req,res)=>res.json(GAS_ORDER));
 
-/* SELL */
 app.post('/api/sell',(req,res)=>{
-  const {type,customer,cylinder_numbers_input}=req.body;
-  const nums=expandNumbers(type,cylinder_numbers_input);
+  const {type,customer,numbers} = req.body;
+  const list = numbers.split(',').map(n=>n.trim());
+  const cust = db.prepare(
+    'INSERT OR IGNORE INTO customers (name,aadhar,phone) VALUES (?,?,?)'
+  );
+  cust.run(customer.name, customer.aadhar, customer.phone);
 
-  let cust=db.prepare(
-    'SELECT * FROM customers WHERE aadhar=?'
-  ).get(customer.aadhar);
-
-  if(!cust){
-    const r=db.prepare(
-      'INSERT INTO customers (name,aadhar,phone) VALUES (?,?,?)'
-    ).run(customer.name,customer.aadhar,customer.phone);
-    cust={id:r.lastInsertRowid,...customer};
+  for (const n of list) {
+    const c = db.prepare(
+      'SELECT * FROM cylinders WHERE cylinder_number=? AND type=? AND status="inactive"'
+    ).get(n,type);
+    if (!c) return res.status(400).json({error:'Invalid cylinder '+n});
+    db.prepare(
+      'UPDATE cylinders SET status="active" WHERE cylinder_number=?'
+    ).run(n);
+    db.prepare(
+      'INSERT INTO history (action,cylinder_number,cylinder_type,customer_name,created_at) VALUES (?,?,?,?,datetime("now"))'
+    ).run('sell',n,type,customer.name);
   }
-
-  try{
-    for(const cn of nums){
-      const c=db.prepare(
-        'SELECT * FROM cylinders WHERE cylinder_number=? AND status="inactive"'
-      ).get(cn);
-      if(!c) throw new Error('Invalid cylinder '+cn);
-
-      db.prepare(
-        'UPDATE cylinders SET status="active",customer_id=? WHERE cylinder_number=?'
-      ).run(cust.id,cn);
-
-      db.prepare(
-        'INSERT INTO history (action,cylinder_number,cylinder_type,customer_id,customer_name,aadhar,phone,created_at) VALUES (?,?,?,?,?,?,?,?)'
-      ).run('sell',cn,type,cust.id,cust.name,cust.aadhar,cust.phone,nowISO());
-    }
-    res.json({success:true,assigned:nums});
-  }catch(e){
-    res.status(400).json({error:e.message});
-  }
+  res.json({success:true});
 });
 
-/* COUNTS — ALWAYS SHOW ALL GASES */
 app.get('/api/counts',(req,res)=>{
-  const rows=db.prepare(`
+  const rows = db.prepare(`
     SELECT type,
-      SUM(status='active') active_count,
-      SUM(status='inactive') inactive_count
+      SUM(status='active') active,
+      SUM(status='inactive') inactive
     FROM cylinders GROUP BY type
   `).all();
-
-  const map={};
-  rows.forEach(r=>map[r.type]=r);
-
+  const map={}; rows.forEach(r=>map[r.type]=r);
   res.json(GAS_ORDER.map(t=>({
     type:t,
-    active_count:map[t]?.active_count||0,
-    inactive_count:map[t]?.inactive_count||0
+    active:map[t]?.active||0,
+    inactive:map[t]?.inactive||0
   })));
 });
 
@@ -106,5 +66,6 @@ app.get('*',(req,res)=>{
   res.sendFile(path.join(__dirname,'..','frontend','index.html'));
 });
 
-const PORT=process.env.PORT||4000;
-app.listen(PORT,'0.0.0.0',()=>console.log('Server started',PORT));
+app.listen(process.env.PORT||4000,'0.0.0.0',()=>{
+  console.log('Server running');
+});
