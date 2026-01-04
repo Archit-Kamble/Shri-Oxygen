@@ -1,138 +1,68 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const bodyParser = require('body-parser');
-const { db, GAS_ORDER } = require('./db');
+const db = require('./db');
 
 const app = express();
 app.use(cors());
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, '..', 'frontend')));
+app.use(express.json());
+app.use('/', express.static(path.join(__dirname,'..','frontend')));
 
-const now = () => new Date().toISOString();
+const GAS_ORDER = [
+  'Oxygen','M Oxygen','Argon','Callgas','Acetylene','Zerogas',
+  'Carbon Dioxide','Ethylene','Helium','Hydraulic','Mixture',
+  'Other Gas 1','Other Gas 2','Other Gas 3','Other Gas 4','Other Gas 5'
+];
 
-/* LOGIN */
-app.post('/api/login', (req, res) => {
-  const { username, password } = req.body;
-  const u = db.prepare(
+app.post('/api/login',(req,res)=>{
+  const u=db.prepare(
     'SELECT * FROM users WHERE username=? AND password=?'
-  ).get(username, password);
-  if (!u) return res.status(401).json({ error: 'Invalid credentials' });
-  res.json({ username });
+  ).get(req.body.username,req.body.password);
+  if(!u) return res.status(401).json({error:'Invalid'});
+  res.json({username:u.username});
 });
 
-/* TYPES */
-app.get('/api/types', (req, res) => {
-  res.json(GAS_ORDER);
-});
+app.get('/api/types',(req,res)=>res.json(GAS_ORDER));
 
-/* SELL */
-app.post('/api/sell', (req, res) => {
-  const { type, customer, cylinder_numbers_input } = req.body;
+app.post('/api/sell',(req,res)=>{
+  const {type,customer,cylinder_numbers_input}=req.body;
+  const nums=cylinder_numbers_input.split(',').map(n=>n.trim());
+  const cust=db.prepare(
+    'INSERT OR IGNORE INTO customers (name,aadhar,phone) VALUES (?,?,?)'
+  ).run(customer.name,customer.aadhar,customer.phone||null);
 
-  const numbers = cylinder_numbers_input
-    .split(',')
-    .map(n => n.trim())
-    .filter(Boolean)
-    .map(n => {
-      const p = db.prepare(
-        'SELECT cylinder_number FROM cylinders WHERE type=? LIMIT 1'
-      ).get(type).cylinder_number.replace(/\d+$/, '');
-      return p + String(parseInt(n)).padStart(4, '0');
-    });
-
-  let cust = db.prepare(
-    'SELECT * FROM customers WHERE aadhar=?'
-  ).get(customer.aadhar);
-
-  if (!cust) {
-    const r = db.prepare(
-      'INSERT INTO customers (name,aadhar,phone) VALUES (?,?,?)'
-    ).run(customer.name, customer.aadhar, customer.phone || null);
-    cust = { id: r.lastInsertRowid, ...customer };
+  for(const n of nums){
+    const base = type.replace(/[^A-Za-z]/g,'').substring(0,4).toUpperCase();
+    const cn = base + String(n).padStart(4,'0');
+    const r=db.prepare(
+      'SELECT * FROM cylinders WHERE cylinder_number=? AND status="inactive"'
+    ).get(cn);
+    if(!r) return res.status(400).json({error:'Invalid cylinder '+n});
+    db.prepare(
+      'UPDATE cylinders SET status="active",customer_id=? WHERE cylinder_number=?'
+    ).run(customer.aadhar,cn);
+    db.prepare(
+      'INSERT INTO history (action,cylinder_number,cylinder_type,customer_name,aadhar,created_at) VALUES (?,?,?,?,?,?)'
+    ).run('sell',cn,type,customer.name,customer.aadhar,new Date().toISOString());
   }
-
-  const upd = db.prepare(
-    'UPDATE cylinders SET status="active", customer_id=? WHERE cylinder_number=? AND status="inactive"'
-  );
-
-  const hist = db.prepare(
-    'INSERT INTO history VALUES (NULL,?,?,?,?,?,?,?,?)'
-  );
-
-  for (const cn of numbers) {
-    const ok = upd.run(cust.id, cn).changes;
-    if (!ok) return res.status(400).json({ error: 'Invalid cylinder ' + cn });
-    hist.run(
-      'sell', cn, type, cust.id, cust.name,
-      cust.aadhar, cust.phone, now()
-    );
-  }
-
-  res.json({ success: true, assigned: numbers });
+  res.json({success:true});
 });
 
-/* RETURN */
-app.post('/api/return', (req, res) => {
-  const { cylinder_number } = req.body;
-  const row = db.prepare(
-    'SELECT * FROM cylinders WHERE cylinder_number=? AND status="active"'
-  ).get(cylinder_number);
-
-  if (!row) return res.status(400).json({ error: 'Invalid return' });
-
-  const cust = db.prepare(
-    'SELECT * FROM customers WHERE id=?'
-  ).get(row.customer_id);
-
-  db.prepare(
-    'UPDATE cylinders SET status="inactive", customer_id=NULL WHERE cylinder_number=?'
-  ).run(cylinder_number);
-
-  db.prepare(
-    'INSERT INTO history VALUES (NULL,?,?,?,?,?,?,?,?)'
-  ).run(
-    'return', cylinder_number, row.type,
-    cust.id, cust.name, cust.aadhar, cust.phone, now()
-  );
-
-  res.json({ success: true });
-});
-
-/* COUNTS */
-app.get('/api/counts', (req, res) => {
-  const rows = db.prepare(`
+app.get('/api/counts',(req,res)=>{
+  const rows=db.prepare(`
     SELECT type,
-      SUM(status='active') active_count,
-      SUM(status='inactive') inactive_count
+    SUM(status='active') active_count,
+    SUM(status='inactive') inactive_count
     FROM cylinders GROUP BY type
   `).all();
-
-  const map = {};
-  rows.forEach(r => map[r.type] = r);
-
-  res.json(
-    GAS_ORDER.map(t => ({
-      type: t,
-      active_count: map[t]?.active_count || 0,
-      inactive_count: map[t]?.inactive_count || 0
-    }))
-  );
+  res.json(GAS_ORDER.map(t=>{
+    const r=rows.find(x=>x.type===t)||{};
+    return {type:t,active_count:r.active_count||0,inactive_count:r.inactive_count||0};
+  }));
 });
 
-/* HISTORY */
-app.get('/api/history', (req, res) => {
-  res.json(
-    db.prepare('SELECT * FROM history ORDER BY created_at DESC').all()
-  );
+app.get('*',(req,res)=>{
+  res.sendFile(path.join(__dirname,'..','frontend','index.html'));
 });
 
-/* FALLBACK */
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
-});
-
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, '0.0.0.0', () =>
-  console.log('Server running on', PORT)
-);
+app.listen(4000,'0.0.0.0',()=>console.log('RUNNING'));
