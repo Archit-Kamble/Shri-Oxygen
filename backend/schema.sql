@@ -11,28 +11,23 @@ CREATE TABLE users (
 CREATE TABLE customers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  aadhar TEXT UNIQUE NOT NULL,
-  phone TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  aadhar TEXT UNIQUE,
+  phone TEXT
 );
 
 CREATE TABLE cylinders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  cylinder_number TEXT UNIQUE NOT NULL,
+  cylinder_number TEXT PRIMARY KEY,
   type TEXT NOT NULL,
-  status TEXT CHECK(status IN ('active','inactive')) NOT NULL,
-  customer_id INTEGER,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  status TEXT NOT NULL,
+  customer_id INTEGER
 );
 
 CREATE TABLE history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  action TEXT CHECK(action IN ('sell','return')) NOT NULL,
-  cylinder_number TEXT NOT NULL,
-  cylinder_type TEXT NOT NULL,
-  customer_id INTEGER,
+  action TEXT,
+  cylinder_number TEXT,
+  cylinder_type TEXT,
   customer_name TEXT,
   aadhar TEXT,
-  phone TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT
 );
