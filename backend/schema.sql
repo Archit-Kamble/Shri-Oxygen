@@ -1,33 +1,32 @@
-DROP TABLE IF EXISTS users;
-DROP TABLE IF EXISTS customers;
-DROP TABLE IF EXISTS cylinders;
-DROP TABLE IF EXISTS history;
-
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   username TEXT PRIMARY KEY,
   password TEXT NOT NULL
 );
 
-CREATE TABLE customers (
+CREATE TABLE IF NOT EXISTS customers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   aadhar TEXT UNIQUE,
-  phone TEXT
+  phone TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE cylinders (
-  cylinder_number TEXT PRIMARY KEY,
-  type TEXT NOT NULL,
-  status TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS cylinders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cylinder_number TEXT UNIQUE,
+  type TEXT,
+  status TEXT CHECK(status IN ('active','inactive')),
   customer_id INTEGER
 );
 
-CREATE TABLE history (
+CREATE TABLE IF NOT EXISTS history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   action TEXT,
   cylinder_number TEXT,
   cylinder_type TEXT,
+  customer_id INTEGER,
   customer_name TEXT,
   aadhar TEXT,
-  created_at TEXT
+  phone TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
