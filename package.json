@@ -1,0 +1,11 @@
+{
+  "name": "shri-oxygen",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "cd backend && npm install && node server.js"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
