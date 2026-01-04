@@ -32,20 +32,32 @@ const GAS_ORDER = [
   'Other Gas 5'
 ];
 
-/* ================= CYLINDER SEED (SQLITE SAFE) ================= */
+/* ================= GAS PREFIX (SINGLE SOURCE OF TRUTH) ================= */
+const GAS_PREFIX = {
+  'Oxygen':'OXY',
+  'M Oxygen':'MOXY',
+  'Argon':'ARG',
+  'Callgas':'CALL',
+  'Acetylene':'ACET',
+  'Zerogas':'ZERO',
+  'Carbon Dioxide':'CO2',
+  'Ethylene':'ETH',
+  'Helium':'HE',
+  'Hydraulic':'HYD',
+  'Mixture':'MIX',
+  'Other Gas 1':'OG1',
+  'Other Gas 2':'OG2',
+  'Other Gas 3':'OG3',
+  'Other Gas 4':'OG4',
+  'Other Gas 5':'OG5'
+};
+
+/* ================= CYLINDER SEED ================= */
 function seedCylindersIfNeeded(){
   const count = db.prepare('SELECT COUNT(*) AS c FROM cylinders').get().c;
   if (count > 0) return;
 
   console.log('Seeding cylinders...');
-
-  const prefix = {
-    'Oxygen':'OXY','M Oxygen':'MOXY','Argon':'ARG','Callgas':'CALL',
-    'Acetylene':'ACET','Zerogas':'ZERO','Carbon Dioxide':'CO2',
-    'Ethylene':'ETH','Helium':'HE','Hydraulic':'HYD','Mixture':'MIX',
-    'Other Gas 1':'OG1','Other Gas 2':'OG2','Other Gas 3':'OG3',
-    'Other Gas 4':'OG4','Other Gas 5':'OG5'
-  };
 
   const insert = db.prepare(
     'INSERT INTO cylinders (cylinder_number,type,status) VALUES (?,?,?)'
@@ -53,13 +65,39 @@ function seedCylindersIfNeeded(){
 
   const tx = db.transaction(()=>{
     for (const type of GAS_ORDER){
+      const prefix = GAS_PREFIX[type];
       for (let i=1;i<=1000;i++){
-        insert.run(prefix[type]+String(i).padStart(4,'0'), type, 'inactive');
+        insert.run(prefix + String(i).padStart(4,'0'), type, 'inactive');
       }
     }
   });
+
   tx();
   console.log('Cylinder seeding completed');
+}
+
+/* ================= PARSE CYLINDER INPUT ================= */
+function parseCylinderInput(type, input){
+  const prefix = GAS_PREFIX[type];
+  if (!prefix) throw new Error('Invalid gas type');
+
+  const tokens = input.split(',').map(s=>s.trim()).filter(Boolean);
+  const out = [];
+
+  for (const t of tokens){
+    if (t.includes('-')){
+      const [a,b] = t.split('-').map(Number);
+      if (isNaN(a) || isNaN(b)) continue;
+      for (let i=a;i<=b;i++){
+        out.push(prefix + String(i).padStart(4,'0'));
+      }
+    } else {
+      const n = Number(t);
+      if (isNaN(n)) continue;
+      out.push(prefix + String(n).padStart(4,'0'));
+    }
+  }
+  return [...new Set(out)];
 }
 
 /* ================= LOGIN ================= */
@@ -91,7 +129,13 @@ app.post('/api/sell',(req,res)=>{
   if(!type||!customer?.name||!customer?.aadhar)
     return res.status(400).json({error:'Missing fields'});
 
-  const nums=cylinder_numbers_input.split(',').map(x=>x.trim()).filter(Boolean);
+  let cylinders;
+  try {
+    cylinders = parseCylinderInput(type, cylinder_numbers_input);
+  } catch (e){
+    return res.status(400).json({error:e.message});
+  }
+
   let cust=db.prepare('SELECT * FROM customers WHERE aadhar=?').get(customer.aadhar);
   if(!cust){
     const r=db.prepare(
@@ -100,38 +144,54 @@ app.post('/api/sell',(req,res)=>{
     cust=db.prepare('SELECT * FROM customers WHERE id=?').get(r.lastInsertRowid);
   }
 
-  const upd=db.prepare('UPDATE cylinders SET status=?,customer_id=? WHERE cylinder_number=?');
+  const upd=db.prepare(
+    'UPDATE cylinders SET status=?,customer_id=? WHERE cylinder_number=?'
+  );
   const hist=db.prepare(
     'INSERT INTO history (action,cylinder_number,cylinder_type,customer_id,customer_name,aadhar,phone,created_at) VALUES (?,?,?,?,?,?,?,?)'
   );
 
   try{
     const assigned=[];
-    for(const cn of nums){
-      const r=db.prepare('SELECT * FROM cylinders WHERE cylinder_number=?').get(cn);
+    for(const cn of cylinders){
+      const r=db.prepare(
+        'SELECT * FROM cylinders WHERE cylinder_number=?'
+      ).get(cn);
       if(!r||r.status!=='inactive'||r.type!==type)
-        throw new Error('Invalid cylinder '+cn);
+        throw new Error('Invalid cylinder ' + cn);
+
       upd.run('active',cust.id,cn);
       hist.run('sell',cn,type,cust.id,cust.name,cust.aadhar,cust.phone,nowISO());
       assigned.push(cn);
     }
     res.json({success:true,assigned});
-  }catch(e){res.status(400).json({error:e.message});}
+  }catch(e){
+    res.status(400).json({error:e.message});
+  }
 });
 
 /* ================= RETURN ================= */
 app.post('/api/return',(req,res)=>{
   const {cylinder_number}=req.body||{};
-  const r=db.prepare('SELECT * FROM cylinders WHERE cylinder_number=?').get(cylinder_number);
+  const r=db.prepare(
+    'SELECT * FROM cylinders WHERE cylinder_number=?'
+  ).get(cylinder_number);
+
   if(!r||r.status!=='active')
     return res.status(400).json({error:'Invalid return'});
-  const c=db.prepare('SELECT * FROM customers WHERE id=?').get(r.customer_id);
+
+  const c=db.prepare(
+    'SELECT * FROM customers WHERE id=?'
+  ).get(r.customer_id);
+
   db.prepare(
     'UPDATE cylinders SET status="inactive",customer_id=NULL WHERE cylinder_number=?'
   ).run(cylinder_number);
+
   db.prepare(
     'INSERT INTO history (action,cylinder_number,cylinder_type,customer_id,customer_name,aadhar,phone,created_at) VALUES (?,?,?,?,?,?,?,?)'
   ).run('return',cylinder_number,r.type,c?.id,c?.name,c?.aadhar,c?.phone,nowISO());
+
   res.json({success:true});
 });
 
@@ -139,74 +199,79 @@ app.post('/api/return',(req,res)=>{
 app.get('/api/search',(req,res)=>{
   const q=(req.query.q||'').trim();
   if(!q) return res.status(400).json({error:'Missing'});
-  const cust=db.prepare('SELECT * FROM customers WHERE aadhar=?').get(q);
+
+  const cust=db.prepare(
+    'SELECT * FROM customers WHERE aadhar=?'
+  ).get(q);
+
   if(cust){
     const counts={};
     db.prepare(
       "SELECT type,COUNT(*) cnt FROM cylinders WHERE customer_id=? AND status='active' GROUP BY type"
     ).all(cust.id).forEach(r=>counts[r.type]=r.cnt);
+
     const history=db.prepare(
       'SELECT * FROM history WHERE customer_id=? ORDER BY created_at DESC'
     ).all(cust.id);
+
     return res.json({type:'customer',customer:cust,counts,history});
   }
-  const cyl=db.prepare('SELECT * FROM cylinders WHERE cylinder_number=?').get(q);
+
+  const cyl=db.prepare(
+    'SELECT * FROM cylinders WHERE cylinder_number=?'
+  ).get(q);
+
   if(cyl){
     const history=db.prepare(
       'SELECT * FROM history WHERE cylinder_number=? ORDER BY created_at DESC'
     ).all(q);
     return res.json({type:'cylinder',cylinder:cyl,history});
   }
+
   res.status(404).json({error:'Not found'});
 });
 
-/* ================= COUNTS ================= */
-app.get('/api/counts', (req, res) => {
-  const rows = db.prepare(`
+/* ================= COUNTS (ORDER SAFE) ================= */
+app.get('/api/counts',(req,res)=>{
+  const rows=db.prepare(`
     SELECT type,
-           SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_count,
-           SUM(CASE WHEN status='inactive' THEN 1 ELSE 0 END) AS inactive_count
-    FROM cylinders
-    GROUP BY type
+      SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) active_count,
+      SUM(CASE WHEN status='inactive' THEN 1 ELSE 0 END) inactive_count
+    FROM cylinders GROUP BY type
   `).all();
 
-  // Map DB results by type
-  const map = {};
-  for (const r of rows) {
-    map[r.type] = {
-      active_count: r.active_count || 0,
-      inactive_count: r.inactive_count || 0
-    };
-  }
+  const map={};
+  rows.forEach(r=>{
+    map[r.type]={active:r.active_count||0,inactive:r.inactive_count||0};
+  });
 
-  // Force GAS_ORDER + zero-safe counts
-  const result = GAS_ORDER.map(type => ({
-    type,
-    active_count: map[type]?.active_count || 0,
-    inactive_count: map[type]?.inactive_count || 0
-  }));
-
-  res.json(result);
+  res.json(GAS_ORDER.map(t=>({
+    type:t,
+    active_count:map[t]?.active||0,
+    inactive_count:map[t]?.inactive||0
+  })));
 });
 
-
+/* ================= ACTIVE CUSTOMERS ================= */
 app.get('/api/active-customers',(req,res)=>{
-  const rows=db.prepare(
+  res.json(db.prepare(
     "SELECT DISTINCT c.id,c.name,c.aadhar,c.phone FROM customers c JOIN cylinders cy ON c.id=cy.customer_id WHERE cy.type=? AND cy.status='active'"
-  ).all(req.query.type);
-  res.json(rows);
+  ).all(req.query.type));
 });
 
+/* ================= HISTORY ================= */
 app.get('/api/history',(req,res)=>{
-  res.json(db.prepare('SELECT * FROM history ORDER BY created_at DESC').all());
+  res.json(db.prepare(
+    'SELECT * FROM history ORDER BY created_at DESC'
+  ).all());
 });
 
+/* ================= FALLBACK ================= */
 app.get('*',(req,res)=>{
   res.sendFile(path.join(__dirname,'..','frontend','index.html'));
 });
 
-
-
+/* ================= START ================= */
 seedCylindersIfNeeded();
 const PORT=process.env.PORT||4000;
 app.listen(PORT,'0.0.0.0',()=>console.log('Server started on port',PORT));
