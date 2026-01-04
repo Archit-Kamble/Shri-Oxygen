@@ -1,26 +1,72 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+
 const DB_FILE = path.join(__dirname, 'cylinder.db');
 const db = new Database(DB_FILE);
 
-const schema = fs.readFileSync(path.join(__dirname,'schema.sql'),'utf8');
+// Load schema
+const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
 db.exec(schema);
 
-const u = db.prepare('SELECT COUNT(*) AS c FROM users').get();
-if (!u || u.c===0) db.prepare('INSERT OR IGNORE INTO users (username,password) VALUES (?,?)').run('Vijay','1234');
+// Default user
+db.prepare(
+  'INSERT INTO users (username,password) VALUES (?,?)'
+).run('Vijay', '1234');
 
-const types = ["Hp(In)", "LPG(In)", "Oxygen", "Carbon Dioxide", "Nitrogen", "Hydrogen", "Helium", "Acetylene", "Propane", "Butane", "Chlorine", "Ammonia", "Sulfur Dioxide", "Methane", "Nitrous Oxide", "Fluorine", "Neon", "Argon", "Krypton"];
-const ccount = db.prepare('SELECT COUNT(*) AS c FROM cylinders').get();
-if (!ccount || ccount.c===0) {
-  const insert = db.prepare('INSERT INTO cylinders (cylinder_number,type,status) VALUES (?,?,?)');
-  for (const t of types) {
-    const base = t.replace(/[^A-Za-z0-9]/g,'').substring(0,6).toUpperCase();
-    for (let i=1;i<=1000;i++) {
-      const num = base + String(i).padStart(4,'0');
-      insert.run(num, t, 'inactive');
-    }
+// Gas list (FINAL)
+const GAS_ORDER = [
+  'Oxygen',
+  'M Oxygen',
+  'Argon',
+  'Callgas',
+  'Acetylene',
+  'Zerogas',
+  'Carbon Dioxide',
+  'Ethylene',
+  'Helium',
+  'Hydraulic',
+  'Mixture',
+  'Other Gas 1',
+  'Other Gas 2',
+  'Other Gas 3',
+  'Other Gas 4',
+  'Other Gas 5'
+];
+
+// Prefix mapping
+const PREFIX = {
+  'Oxygen': 'OXY',
+  'M Oxygen': 'MOXY',
+  'Argon': 'ARG',
+  'Callgas': 'CALL',
+  'Acetylene': 'ACET',
+  'Zerogas': 'ZERO',
+  'Carbon Dioxide': 'CO2',
+  'Ethylene': 'ETH',
+  'Helium': 'HE',
+  'Hydraulic': 'HYD',
+  'Mixture': 'MIX',
+  'Other Gas 1': 'OG1',
+  'Other Gas 2': 'OG2',
+  'Other Gas 3': 'OG3',
+  'Other Gas 4': 'OG4',
+  'Other Gas 5': 'OG5'
+};
+
+// Seed cylinders
+const insert = db.prepare(
+  'INSERT INTO cylinders (cylinder_number,type,status) VALUES (?,?,?)'
+);
+
+for (const type of GAS_ORDER) {
+  for (let i = 1; i <= 1000; i++) {
+    insert.run(
+      PREFIX[type] + String(i).padStart(4, '0'),
+      type,
+      'inactive'
+    );
   }
 }
 
-module.exports = db;
+module.exports = { db, GAS_ORDER };
