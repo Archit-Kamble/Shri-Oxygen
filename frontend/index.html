@@ -1,78 +1,20 @@
 <!doctype html>
 <html>
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Cylinder Shop</title>
-<style>
-body{font-family:Arial, sans-serif;margin:0;padding:0;background:#f7f7f8;color:#111}
-header{background:#1f8dd6;color:white;padding:12px 16px;display:flex;justify-content:space-between;align-items:center}
-.container{padding:12px}
-input, select, button, textarea{font-size:16px;padding:10px;margin:6px 0;width:100%;box-sizing:border-box}
-.row{display:flex;gap:8px}
-.col{flex:1}
-.btn{background:#1f8dd6;color:white;border:none;padding:12px;border-radius:6px}
-.btn-small{background:#6aa6d9;color:white;border:none;padding:8px;border-radius:6px;font-size:14px}
-.tab{display:flex;gap:8px;margin:8px 0;flex-direction:column}
-.card{background:white;padding:10px;border-radius:6px;margin:8px 0}
-table{width:100%;border-collapse:collapse;margin-top:8px}
-th,td{padding:8px;border:1px solid #ddd;text-align:left;font-size:14px}
-.small{font-size:13px;color:#555}
-</style>
-</head>
 <body>
-<header><div><strong>Shri Oxygen</strong></div><div id="userDisplay">Vijay</div></header>
-<div class="container" id="app">
-  <div id="loginView" class="card">
-    <h3>Login</h3>
-    <input id="loginUsername" placeholder="Username" value="Vijay"/>
-    <input id="loginPassword" type="password" placeholder="Password" value="1234"/>
-    <label><input id="rememberMe" type="checkbox"/> Remember me</label>
-    <button class="btn" id="loginBtn">Login</button>
-    <div id="loginMsg" class="small"></div>
-  </div>
+<h2>Shri Oxygen</h2>
+<input id="u" value="Vijay">
+<input id="p" value="1234">
+<button onclick="login()">Login</button>
 
-  <div id="mainView" style="display:none">
-    <div class="card">
-      <input id="searchBox" placeholder="Search by Aadhar / Name / Cylinder number"/>
-      <button class="btn" id="searchBtn">Search</button>
-    </div>
-
-    <div class="card tab">
-      <button class="btn" id="sellTab">Sell</button>
-      <button class="btn" id="returnTab">Return</button>
-      <button class="btn" id="countsTab">Counts</button>
-      <button class="btn" id="historyTab">History</button>
-    </div>
-
-    <div id="sellView" class="card" style="display:none">
-      <h3>Sell (manual numbers)</h3>
-      <label>Type</label><select id="sellType"></select>
-      <label>Enter cylinder numbers (comma or ranges e.g. 1-5)</label>
-      <textarea id="cylinderNumbersInput" style="height:100px"></textarea>
-      <label>Customer name</label><input id="custName"/>
-      <label>Aadhar</label><input id="custAadhar"/>
-      <label>Phone (optional)</label><input id="custPhone"/>
-      <button class="btn" id="doSell">Sell</button>
-      <div id="sellMsg" class="small"></div>
-    </div>
-
-    <div id="returnView" class="card" style="display:none">
-      <h3>Return</h3>
-      <label>Type</label><select id="returnType"></select>
-      <label>Active cylinder</label><select id="returnCylinder"></select>
-      <button class="btn" id="doReturn">Return</button>
-      <div id="returnMsg" class="small"></div>
-    </div>
-
-    <div id="countsView" class="card" style="display:none"><h3>Counts</h3><div id="countsList"></div></div>
-
-    <div id="historyView" class="card" style="display:none">
-      <h3>Global History</h3><div id="historyList"></div><button id="loadMore" class="btn-small">Load more</button>
-    </div>
-
-  </div>
+<div id="app" style="display:none">
+<select id="type"></select>
+<input id="nums" placeholder="OXY0001,OXY0002">
+<input id="name" placeholder="Name">
+<input id="aad" placeholder="Aadhar">
+<button onclick="sell()">Sell</button>
+<pre id="out"></pre>
 </div>
-<script src="/app.js"></script>
+
+<script src="app.js"></script>
 </body>
 </html>
