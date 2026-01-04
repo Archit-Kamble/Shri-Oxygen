@@ -7,15 +7,13 @@ CREATE TABLE IF NOT EXISTS customers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   aadhar TEXT UNIQUE,
-  phone TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  phone TEXT
 );
 
 CREATE TABLE IF NOT EXISTS cylinders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  cylinder_number TEXT UNIQUE,
-  type TEXT,
-  status TEXT CHECK(status IN ('active','inactive')),
+  cylinder_number TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
   customer_id INTEGER
 );
 
@@ -24,9 +22,6 @@ CREATE TABLE IF NOT EXISTS history (
   action TEXT,
   cylinder_number TEXT,
   cylinder_type TEXT,
-  customer_id INTEGER,
   customer_name TEXT,
-  aadhar TEXT,
-  phone TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT
 );
