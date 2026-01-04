@@ -161,12 +161,34 @@ app.get('/api/search',(req,res)=>{
 });
 
 /* ================= COUNTS ================= */
-app.get('/api/counts',(req,res)=>{
-  const rows=db.prepare(
-    "SELECT type,SUM(status='active') active_count,SUM(status='inactive') inactive_count FROM cylinders GROUP BY type"
-  ).all().filter(r=>GAS_ORDER.includes(r.type));
-  res.json(rows);
+app.get('/api/counts', (req, res) => {
+  const rows = db.prepare(`
+    SELECT type,
+           SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_count,
+           SUM(CASE WHEN status='inactive' THEN 1 ELSE 0 END) AS inactive_count
+    FROM cylinders
+    GROUP BY type
+  `).all();
+
+  // Map DB results by type
+  const map = {};
+  for (const r of rows) {
+    map[r.type] = {
+      active_count: r.active_count || 0,
+      inactive_count: r.inactive_count || 0
+    };
+  }
+
+  // Force GAS_ORDER + zero-safe counts
+  const result = GAS_ORDER.map(type => ({
+    type,
+    active_count: map[type]?.active_count || 0,
+    inactive_count: map[type]?.inactive_count || 0
+  }));
+
+  res.json(result);
 });
+
 
 app.get('/api/active-customers',(req,res)=>{
   const rows=db.prepare(
