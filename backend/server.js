@@ -183,8 +183,7 @@ app.get('*',(req,res)=>{
   res.sendFile(path.join(__dirname,'..','frontend','index.html'));
 });
 
-// ⚠️ ONE-TIME RESET — REMOVE AFTER FIRST RUN
-db.prepare('DELETE FROM cylinders').run();
+
 
 seedCylindersIfNeeded();
 const PORT=process.env.PORT||4000;
