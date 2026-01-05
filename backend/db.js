@@ -1,16 +1,24 @@
-const mysql = require("mysql2");
+const sqlite3 = require("sqlite3").verbose();
+const path = require("path");
 
-const db = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 3306
+const dbPath = path.join(__dirname, "database.sqlite");
+
+const db = new sqlite3.Database(dbPath, err => {
+  if (err) {
+    console.error("SQLite connection error:", err);
+  } else {
+    console.log("SQLite database connected");
+  }
 });
 
-db.connect(err => {
-  if (err) console.error("DB error:", err);
-  else console.log("Database connected");
-});
+/* Create table if not exists */
+db.run(`
+  CREATE TABLE IF NOT EXISTS cylinders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    price REAL NOT NULL
+  )
+`);
 
 module.exports = db;
