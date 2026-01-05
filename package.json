@@ -1,12 +1,13 @@
 {
-  "name": "shri-oxygen",
+  "name": "cylinder-shop",
   "version": "1.0.0",
+  "private": true,
   "scripts": {
     "start": "node backend/server.js"
   },
   "dependencies": {
-    "better-sqlite3": "^9.4.0",
     "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "express": "^4.18.2",
+    "mysql2": "^3.6.0"
   }
 }
